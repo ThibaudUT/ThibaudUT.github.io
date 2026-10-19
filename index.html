@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Dashboard - Projet Flambère</title>
+    
+    <!-- Librairies externes (Leaflet pour la carte, Chart.js pour les graphiques) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --primary: #1e3a8a;
+            --secondary: #3b82f6;
+            --accent: #f59e0b;
+            --bg-body: #f8fafc;
+            --bg-panel: #ffffff;
+            --text-dark: #1e293b;
+            --border: #e2e8f0;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        body { background-color: var(--bg-body); color: var(--text-dark); display: flex; flex-direction: column; height: 100vh; }
+        
+        /* Navbar / Tabs */
+        header { background: var(--primary); color: white; padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 10; }
+        header h1 { font-size: 1.5rem; }
+        .tabs { display: flex; gap: 10px; }
+        .tab-btn { background: rgba(255,255,255,0.2); border: none; color: white; padding: 0.5rem 1rem; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .tab-btn:hover, .tab-btn.active { background: white; color: var(--primary); }
+
+        /* Pages container */
+        .page { display: none; flex: 1; overflow: hidden; }
+        .page.active { display: flex; }
+
+        /* --- Page 1: Carte & Filtres --- */
+        #page-map {
+            flex-direction: row;
+            min-height: 0;
+            width: 100%;
+        }
+        .sidebar { width: 350px; background: var(--bg-panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 1.5rem; overflow-y: auto; }
+        .sidebar h2 { font-size: 1.2rem; margin-bottom: 1rem; color: var(--primary); }
+        .filter-group { margin-bottom: 1rem; }
+        .filter-group label { display: block; font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem; }
+        .filter-group select, .filter-group input { width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 5px; }
+        .reset-btn { width: 100%; border: none; background: var(--primary); color: white; padding: 0.65rem; border-radius: 5px; cursor: pointer; font-weight: 600; margin-top: 0.25rem; }
+        .reset-btn:hover { opacity: 0.9; }
+
+        #map-container {
+            flex: 1 1 auto;
+            width: 100%;
+            height: 100%;
+            min-height: 500px;
+            position: relative;
+            z-index: 1;
+            background: #e5e7eb;
+        }
+
+        #map-container .leaflet-container {
+            width: 100%;
+            height: 100%;
+            min-height: 500px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* --- Page 2: Tableau --- */
+        #page-table { padding: 2rem; flex-direction: column; overflow-y: auto; }
+        .table-wrapper { background: var(--bg-panel); border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow-x: auto; padding: 1rem; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+        th { background: #f1f5f9; font-weight: 600; color: var(--primary); position: sticky; top: 0; }
+        tr:hover { background-color: #f8fafc; }
+
+        /* --- Page 3: Statistiques --- */
+        #page-stats { padding: 1.5rem; overflow-y: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; align-items: start; }
+        #page-stats.active { display: grid; }
+        .stats-intro { grid-column: 1 / -1; background: white; border-radius: 8px; padding: 1rem 1.25rem; box-shadow: 0 2px 5px rgba(0,0,0,.05); }
+        .kpi-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.9rem; }
+        .kpi { background: white; border-radius: 8px; padding: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,.05); border-left: 4px solid var(--secondary); }
+        .kpi .value { font-size: 1.5rem; font-weight: 800; color: var(--primary); }
+        .kpi .label { margin-top: 0.25rem; font-size: 0.78rem; color: #64748b; }
+        .chart-card { background: var(--bg-panel); padding: 1.5rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); min-height: 300px; }
+        .chart-card h3 { color: var(--primary); margin-bottom: 1rem; text-align: center; }
+        .chart-card.wide { grid-column: 1 / -1; }
+        .chart-card canvas { width: 100% !important; height: 280px !important; }
+
+        @media (max-width: 1100px) {
+            .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+        @media (max-width: 800px) {
+            #page-stats { grid-template-columns: 1fr; }
+            .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .sidebar { width: 300px; }
+        }
+
+        .badge-prive { background: #fee2e2; color: #991b1b; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+        .badge-public { background: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Analyse Stratégique - Projet Impasse de la Flambère</h1>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('page-map', this)">1. Carte & Filtres</button>
+            <button class="tab-btn" onclick="switchTab('page-table', this)">2. Tableau</button>
+            <button class="tab-btn" onclick="switchTab('page-stats', this)">3. Statistiques</button>
+        </div>
+    </header>
+
+    <!-- PAGE 1 : CARTE & FILTRES -->
+    <div id="page-map" class="page active">
+        <div class="sidebar">
+            <h2>Filtres dynamiques</h2>
+
+            <div class="filter-group">
+                <label>Recherche</label>
+                <input type="text" id="f-search" placeholder="Nom ou adresse..." oninput="applyFilters()">
+            </div>
+
+            <div class="filter-group">
+                <label>Catégorie d'activité</label>
+                <select id="f-category" onchange="applyFilters()">
+                    <option value="All">Toutes les activités</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Propriétaire</label>
+                <select id="f-owner" onchange="applyFilters()">
+                    <option value="All">Public & privé</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Distance maximale : <span id="dist-val">10</span> km</label>
+                <input type="range" id="f-dist" min="0" max="10" step="0.5" value="10"
+                       oninput="document.getElementById('dist-val').innerText=this.value; applyFilters()">
+            </div>
+
+            <div class="filter-group">
+                <label>Capacité</label>
+                <select id="f-capacity" onchange="applyFilters()">
+                    <option value="All">Toutes</option>
+                    <option value="known">Capacité renseignée</option>
+                    <option value="unknown">Capacité non renseignée</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Personnel / effectif</label>
+                <select id="f-staff" onchange="applyFilters()">
+                    <option value="All">Toutes</option>
+                    <option value="known">Personnel renseigné</option>
+                    <option value="unknown">Personnel non renseigné</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Chiffre d'affaires</label>
+                <select id="f-ca" onchange="applyFilters()">
+                    <option value="All">Toutes</option>
+                    <option value="known">CA renseigné</option>
+                    <option value="unknown">CA non renseigné</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Tarification</label>
+                <select id="f-price" onchange="applyFilters()">
+                    <option value="All">Toutes</option>
+                    <option value="known">Tarif renseigné</option>
+                    <option value="unknown">Tarif non renseigné</option>
+                    <option value="free">Gratuit / associatif</option>
+                    <option value="subscription">Abonnement</option>
+                    <option value="rental">Location / séance</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Horaires</label>
+                <select id="f-hours" onchange="applyFilters()">
+                    <option value="All">Tous</option>
+                    <option value="known">Horaires renseignés</option>
+                    <option value="unknown">Horaires non renseignés</option>
+                    <option value="late">Ouverture jusqu'à 23h ou plus</option>
+                    <option value="daily">Ouvert 7j/7</option>
+                </select>
+            </div>
+
+            <button class="reset-btn" onclick="resetFilters()">Réinitialiser les filtres</button>
+        </div>
+        <div id="map-container"></div>
+    </div>
+
+    <!-- PAGE 2 : TABLEAU D'ANALYSE -->
+    <div id="page-table" class="page">
+        <div class="table-wrapper">
+            <table id="data-table">
+                <thead>
+                    <tr>
+                        <th>Structure</th>
+                        <th>Catégorie</th>
+                        <th>Distance</th>
+                        <th>Propriétaire</th>
+                        <th>Capacité</th>
+                        <th>Tarifs / Abo</th>
+                        <th>Horaires</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Lignes générées en JS -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- PAGE 3 : STATISTIQUES -->
+    <div id="page-stats" class="page">
+        <div class="stats-intro">
+            <h2 style="color:var(--primary); margin-bottom:0.35rem;">Analyse de la concurrence</h2>
+            <p style="color:#64748b; font-size:0.9rem;">
+                Les indicateurs ci-dessous se recalculent automatiquement selon les filtres sélectionnés sur la page 1.
+                Ils utilisent uniquement les informations disponibles dans la base de l'étude.
+            </p>
+        </div>
+
+        <div class="kpi-grid">
+            <div class="kpi"><div class="value" id="kpi-total">0</div><div class="label">Équipements affichés</div></div>
+            <div class="kpi"><div class="value" id="kpi-near">0</div><div class="label">À moins de 3 km</div></div>
+            <div class="kpi"><div class="value" id="kpi-avg-dist">—</div><div class="label">Distance moyenne</div></div>
+            <div class="kpi"><div class="value" id="kpi-private">0%</div><div class="label">Structures privées</div></div>
+            <div class="kpi"><div class="value" id="kpi-price">0%</div><div class="label">Tarifs renseignés</div></div>
+        </div>
+
+        <div class="chart-card">
+            <h3>Nombre d'équipements par activité</h3>
+            <canvas id="chartActivities"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Répartition par propriétaire</h3>
+            <canvas id="chartOwner"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Répartition géographique par distance</h3>
+            <canvas id="chartDistanceBands"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Tarification observée</h3>
+            <canvas id="chartPricing"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Amplitude des horaires</h3>
+            <canvas id="chartHours"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Niveau d'information disponible</h3>
+            <canvas id="chartDataQuality"></canvas>
+        </div>
+        <div class="chart-card wide">
+            <h3>Capacité renseignée par catégorie</h3>
+            <canvas id="chartCapacity"></canvas>
+        </div>
+    </div>
+
+    <!-- SCRIPT APPLICATION -->
+    <script>
+        // 1. Base de données complète du tableau Excel
+        const data = [
+            { name: "Basic-Fit Saint-Martin-du-Touch", cat: "Muscu / Fitness", address: "7 rue Marie Louise Dissard, 31300 Toulouse", dist: 0.3, owner: "Privé", surface: "972 m²", capacity: "NC", staff: "NC", ca: "NC", price: "~20€ à 30€ / mois", hours: "Lun-Ven 06h-22h30, WE 09h-19h", lat: 43.613, lng: 1.383 },
+            { name: "Basic-Fit Sept Deniers", cat: "Muscu / Fitness", address: "2 rue de l'Égalité, 31200 Toulouse", dist: 4.0, owner: "Privé", surface: "2 849 m²", capacity: "NC", staff: "NC", ca: "NC", price: "~20€ à 30€ / mois", hours: "Lun-Ven 06h-22h30, WE 09h-19h", lat: 43.6258, lng: 1.4078 },
+            { name: "Fitness Park La Cartoucherie", cat: "Muscu / Fitness", address: "1 allée Georges Charpak, 31300 Toulouse", dist: 3.0, owner: "Privé", surface: "932 m²", capacity: "NC", staff: "NC", ca: "NC", price: "~30€ à 35€ / mois", hours: "Lun-Dim 06h-23h", lat: 43.601, lng: 1.406 },
+            { name: "Interval Purpan et Colomiers", cat: "Muscu / Fitness", address: "21 Rue Marius Tercé, 31300 Toulouse", dist: 2.5, owner: "Privé", surface: "NC", capacity: "NC", staff: "NC", ca: "NC", price: "NC", hours: "Lun-Dim 06h-23h", lat: 43.611, lng: 1.385 },
+            { name: "Equinoxe", cat: "Muscu / Fitness", address: "38 Bis avenue de Lombez, 31300 Toulouse", dist: 4.5, owner: "Privé", surface: "130 m²", capacity: "NC", staff: "NC", ca: "NC", price: "NC", hours: "Lun-Ven 09h-21h, Sam 09h-18h", lat: 43.596, lng: 1.421 },
+            { name: "Euforie", cat: "Muscu / Fitness", address: "5 Rue de la Pomme, 31000 Toulouse", dist: 6.0, owner: "Privé", surface: "182 m²", capacity: "NC", staff: "NC", ca: "NC", price: "NC", hours: "Lun-Ven 08h-21h, Sam 10h45-18h", lat: 43.603, lng: 1.445 },
+            { name: "Toulouse Padel Club & Squash", cat: "Pickleball / Raquette", address: "11 rue Marie-Louise Dissard, 31300 Toulouse", dist: 0.3, owner: "Privé", surface: "800 m²", capacity: "14 pistes padel / 4 squash", staff: "10 à 19 salariés", ca: "RN 2025 : 184 000€ (comptes confidentiels)", price: "NC", hours: "Lun-Ven 10h30-22h30, WE 08h30-21h", lat: 43.6135, lng: 1.382 },
+            { name: "Smash Pickleball", cat: "Pickleball / Raquette", address: "3 Rue de l'Égalité, 31200 Toulouse", dist: 4.0, owner: "Privé", surface: "NC", capacity: "7 terrains", staff: "NC", ca: "NC", price: "Location 1h : 26€ / Abo mensuel : 49€", hours: "Lun-Dim 09h-22h30", lat: 43.6265, lng: 1.4085 },
+            { name: "UrbanPadel Sept Deniers", cat: "Pickleball / Raquette", address: "2 rue de l'Égalité, 31200 Toulouse", dist: 4.0, owner: "Privé", surface: "1 200 m²", capacity: "6 pistes", staff: "NC", ca: "NC", price: "NC", hours: "Lun-Ven 10h-00h, WE 09h-23h", lat: 43.626, lng: 1.408 },
+            { name: "Ace Padel Club (ex 4PADEL)", cat: "Pickleball / Raquette", address: "17-19 Av. Georges Guynemer, 31770 Colomiers", dist: 6.0, owner: "Privé", surface: "NC", capacity: "11 pistes", staff: "NC", ca: "NC", price: "Location estimée 32€ à 48€/h", hours: "Lun-Ven 09h-00h, WE 09h-22h30", lat: 43.614, lng: 1.341 },
+            { name: "Altissimo Saint-Martin", cat: "Escalade", address: "9 rue Marie Louise Dissard, 31300 Toulouse", dist: 0.3, owner: "Privé", surface: "1 200 m²", capacity: "NC", staff: "NC", ca: "NC", price: "~15€ à 25€ / séance", hours: "Lun-Ven 10h-23h, WE 10h-20h", lat: 43.6132, lng: 1.3835 },
+            { name: "The Roof Toulouse", cat: "Escalade", address: "10 place de la charte des libertés, 31300 Toulouse", dist: 3.5, owner: "Privé (SCOP)", surface: "NC", capacity: "NC", staff: "NC", ca: "NC", price: "Abo mensuel : 40€ (classique) / 35€ (réduit)", hours: "Lun-Ven 08h-23h, WE 09h-21h", lat: 43.602, lng: 1.407 },
+            { name: "Block'Out Toulouse", cat: "Escalade", address: "2 Rue de l'Égalité, 31200 Toulouse", dist: 4.0, owner: "Privé", surface: "NC", capacity: "NC", staff: "NC", ca: "NC", price: "Abo mensuel : 45€ / Séance : 17€", hours: "Lun-Ven 11h-23h, WE 09h-21h", lat: 43.6255, lng: 1.408 },
+            { name: "Urban Soccer Sept Deniers", cat: "Multisports", address: "2 rue de l'Égalité, 31200 Toulouse", dist: 4.0, owner: "Privé", surface: "576 m²", capacity: "NC", staff: "NC", ca: "NC", price: "NC", hours: "Lun-Ven 10h-00h, WE 09h-23h", lat: 43.6262, lng: 1.4082 },
+            { name: "Gymnase municipal St-Martin-du-Touch", cat: "Multisports", address: "206 chemin de Tournefeuille, 31300 Toulouse", dist: 1.5, owner: "Public", surface: "656 m²", capacity: "NC", staff: "Public", ca: "Non applicable", price: "Gratuit / Associatif", hours: "Créneaux scolaires/clubs", lat: 43.604, lng: 1.378 },
+            { name: "Gymnase des Arènes Romaines", cat: "Multisports", address: "107 av des Arènes Romaines, 31300 Toulouse", dist: 2.0, owner: "Public", surface: "180 m²", capacity: "NC", staff: "Public", ca: "Non applicable", price: "Gratuit / Associatif", hours: "Créneaux scolaires/clubs", lat: 43.616, lng: 1.400 },
+            { name: "Gymnase de Lardenne", cat: "Multisports", address: "169 Avenue de Lardenne, 31100 Toulouse", dist: 2.5, owner: "Public", surface: "542 m²", capacity: "NC", staff: "Public", ca: "Non applicable", price: "Gratuit / Associatif", hours: "Créneaux scolaires/clubs", lat: 43.593, lng: 1.376 },
+            { name: "Gymnase Lucie Aubrac", cat: "Multisports", address: "Allée Georges Brassens, 31770 Colomiers", dist: 6.5, owner: "Public", surface: "NC", capacity: "NC", staff: "Public", ca: "Non applicable", price: "Gratuit / Associatif", hours: "Créneaux scolaires/clubs", lat: 43.612, lng: 1.332 },
+            { name: "Complexe Sportif de l'Oasis", cat: "Multisports", address: "96 chemin de valette bas, 31170 Tournefeuille", dist: 7.0, owner: "Public", surface: "1 080 m²", capacity: "NC", staff: "Public", ca: "Non applicable", price: "Gratuit / Associatif", hours: "Créneaux scolaires/clubs", lat: 43.582, lng: 1.342 }
+        ];
+
+        // 2. Navigation entre les onglets
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            btn.classList.add('active');
+            
+            if(tabId === 'page-map') {
+                setTimeout(() => {
+                    map.invalidateSize(true);
+                }, 100);
+            } 
+            if(tabId === 'page-stats') { updateCharts(getFilteredData()); }
+        }
+
+        // 3. Initialisation Carte (Leaflet)
+        const center = [43.6152, 1.3931]; // Impasse de la Flambère
+
+        const map = L.map('map-container', {
+            center: center,
+            zoom: 12,
+            zoomControl: true,
+            attributionControl: true
+        });
+
+        const baseLayer = L.tileLayer(
+            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+            {
+                maxZoom: 19,
+                maxNativeZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'
+            }
+        );
+        baseLayer.addTo(map);
+
+        map.createPane('zoneChalandisePane');
+        map.getPane('zoneChalandisePane').style.zIndex = 250;
+
+        const zoneChalandise = [
+            [43.618881, 1.445899], [43.614169, 1.447498], [43.610530, 1.438998], [43.607667, 1.444237],
+            [43.606129, 1.441545], [43.605598, 1.442595], [43.602659, 1.440686], [43.599877, 1.442954],
+            [43.599835, 1.438607], [43.601598, 1.429187], [43.596789, 1.440920], [43.593735, 1.441474],
+            [43.593924, 1.440121], [43.592216, 1.441054], [43.587670, 1.437612], [43.586570, 1.430617],
+            [43.579447, 1.437552], [43.578758, 1.436078], [43.578488, 1.428595], [43.581344, 1.424633],
+            [43.579863, 1.420148], [43.577834, 1.417709], [43.567597, 1.421678], [43.568145, 1.416107],
+            [43.572461, 1.412845], [43.567429, 1.414531], [43.567284, 1.413326], [43.563738, 1.412138],
+            [43.562548, 1.405918], [43.565659, 1.396685], [43.567402, 1.394252], [43.570755, 1.392564],
+            [43.578096, 1.392206], [43.576608, 1.389841], [43.577366, 1.387609], [43.583148, 1.388057],
+            [43.583602, 1.386579], [43.584627, 1.386413], [43.581520, 1.382790], [43.579917, 1.378669],
+            [43.579336, 1.375076], [43.580974, 1.373524], [43.571368, 1.367411], [43.570450, 1.365591],
+            [43.572964, 1.362742], [43.576944, 1.361360], [43.580910, 1.364084], [43.577825, 1.360852],
+            [43.581472, 1.362855], [43.579136, 1.358875], [43.579793, 1.355584], [43.581628, 1.355560],
+            [43.579230, 1.350680], [43.580371, 1.349030], [43.581515, 1.349725], [43.581218, 1.347787],
+            [43.582133, 1.346635], [43.588733, 1.355253], [43.590675, 1.351277], [43.590513, 1.345305],
+            [43.596805, 1.344299], [43.600030, 1.339914], [43.600533, 1.337448], [43.599184, 1.330639],
+            [43.601100, 1.329406], [43.602347, 1.324462], [43.604029, 1.328836], [43.605821, 1.329431],
+            [43.607313, 1.328001], [43.609431, 1.336408], [43.610388, 1.334769], [43.616311, 1.334498],
+            [43.615447, 1.385297], [43.616066, 1.387475], [43.617595, 1.389733], [43.625042, 1.379505],
+            [43.626190, 1.379431], [43.628930, 1.381017], [43.626065, 1.384082], [43.626068, 1.386099],
+            [43.625038, 1.386907], [43.625724, 1.386929], [43.624103, 1.388745], [43.632847, 1.385647],
+            [43.635265, 1.392616], [43.639181, 1.393100], [43.640253, 1.395217], [43.640299, 1.404702],
+            [43.638736, 1.408262], [43.637718, 1.408610], [43.632970, 1.405608], [43.629726, 1.406635],
+            [43.627245, 1.406099], [43.637177, 1.417251], [43.637664, 1.419141], [43.636005, 1.423921],
+            [43.638705, 1.428537], [43.636118, 1.428786], [43.634191, 1.426081], [43.632092, 1.426426],
+            [43.638636, 1.440210], [43.639326, 1.444424], [43.634855, 1.447560], [43.633287, 1.447928],
+            [43.630771, 1.446340], [43.629417, 1.447058], [43.630340, 1.452163], [43.623831, 1.454437],
+            [43.623964, 1.458421], [43.622327, 1.458973], [43.620188, 1.458657]
+        ];
+
+        const zoneLayer = L.polygon(zoneChalandise, {
+            pane: 'zoneChalandisePane',
+            color: '#b83f3b',
+            weight: 4,
+            opacity: 0.9,
+            dashArray: '10 7',
+            lineCap: 'round',
+            lineJoin: 'round',
+            fillColor: '#e5736d',
+            fillOpacity: 0.16,
+            interactive: false
+        }).addTo(map);
+
+        function refreshMapSize() {
+            setTimeout(() => { map.invalidateSize(true); }, 100);
+        }
+
+        window.addEventListener('load', refreshMapSize);
+        window.addEventListener('resize', refreshMapSize);
+
+        const projectIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41]
+        });
+        
+        L.marker(center, {icon: projectIcon}).addTo(map).bindPopup('<b>VOTRE PROJET</b><br>Impasse de la Flambère').openPopup();
+        const radiusCircle = L.circle(center, { color: 'red', fillColor: '#f03', fillOpacity: 0.1, radius: 10000 }).addTo(map);
+
+        let mapMarkers = [];
+        let chartInstances = {};
+
+        // 4. Filtres
+        function isKnown(v) {
+            if (v === null || v === undefined) return false;
+            const s = String(v).trim().toLowerCase();
+            return s !== "" && s !== "nc" && s !== "non communiqué" && s !== "na";
+        }
+
+        function priceType(v) {
+            if (!isKnown(v)) return "unknown";
+            const s = String(v).toLowerCase();
+            if (s.includes("gratuit") || s.includes("asso")) return "free";
+            if (s.includes("abo")) return "subscription";
+            if (s.includes("loc") || s.includes("/h") || s.includes("séance") || s.includes("€/h")) return "rental";
+            return "other";
+        }
+
+        function hasLateHours(v) {
+            if (!isKnown(v)) return false;
+            const matches = String(v).match(/(?:-|à|h)(\d{1,2})h?/g) || [];
+            const nums = matches.map(x => {
+                const m = x.match(/(\d{1,2})/);
+                return m ? Number(m[1]) : 0;
+            });
+            return nums.some(n => n >= 23);
+        }
+
+        function isDaily(v) {
+            return isKnown(v) && /lun-dim|lundi.*dimanche/i.test(String(v));
+        }
+
+        function populateDynamicFilters() {
+            const categories = [...new Set(data.map(d => d.cat))].sort();
+            const owners = [...new Set(data.map(d => d.owner))].sort();
+
+            const catSelect = document.getElementById('f-category');
+            const ownerSelect = document.getElementById('f-owner');
+
+            categories.forEach(v => {
+                const o = document.createElement('option');
+                o.value = v; o.textContent = v;
+                catSelect.appendChild(o);
+            });
+            owners.forEach(v => {
+                const o = document.createElement('option');
+                o.value = v; o.textContent = v;
+                ownerSelect.appendChild(o);
+            });
+        }
+
+        function getFilteredData() {
+            const search = document.getElementById('f-search').value.toLowerCase().trim();
+            const cat = document.getElementById('f-category').value;
+            const owner = document.getElementById('f-owner').value;
+            const dist = parseFloat(document.getElementById('f-dist').value);
+            const capacity = document.getElementById('f-capacity').value;
+            const staff = document.getElementById('f-staff').value;
+            const ca = document.getElementById('f-ca').value;
+            const price = document.getElementById('f-price').value;
+            const hours = document.getElementById('f-hours').value;
+
+            return data.filter(d => {
+                const matchSearch = !search || d.name.toLowerCase().includes(search) || d.address.toLowerCase().includes(search);
+                const matchCat = cat === 'All' || d.cat === cat;
+                const matchOwner = owner === 'All' || d.owner === owner;
+                const matchDist = d.dist <= dist;
+                const matchCapacity = capacity === 'All' || (capacity === 'known' ? isKnown(d.capacity) : !isKnown(d.capacity));
+                const matchStaff = staff === 'All' || (staff === 'known' ? isKnown(d.staff) : !isKnown(d.staff));
+                const matchCA = ca === 'All' || (ca === 'known' ? isKnown(d.ca) : !isKnown(d.ca));
+
+                let matchPrice = true;
+                if (price === 'known') matchPrice = isKnown(d.price);
+                else if (price === 'unknown') matchPrice = !isKnown(d.price);
+                else if (price !== 'All') matchPrice = priceType(d.price) === price;
+
+                let matchHours = true;
+                if (hours === 'known') matchHours = isKnown(d.hours);
+                else if (hours === 'unknown') matchHours = !isKnown(d.hours);
+                else if (hours === 'late') matchHours = hasLateHours(d.hours);
+                else if (hours === 'daily') matchHours = isDaily(d.hours);
+
+                return matchSearch && matchCat && matchOwner && matchDist &&
+                       matchCapacity && matchStaff && matchCA && matchPrice && matchHours;
+            });
+        }
+
+        function applyFilters() {
+            const dist = parseFloat(document.getElementById('f-dist').value);
+            radiusCircle.setRadius(dist * 1000);
+
+            const filteredData = getFilteredData();
+
+            mapMarkers.forEach(m => map.removeLayer(m));
+            mapMarkers = [];
+
+            filteredData.forEach(d => {
+                let color = d.cat === "Escalade" ? "orange" :
+                            d.cat === "Pickleball / Raquette" ? "green" :
+                            d.owner === "Privé" ? "violet" : "blue";
+
+                let icon = L.icon({
+                    iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+                    iconSize: [25, 41],
+                    iconAnchor: [12, 41]
+                });
+
+                let marker = L.marker([d.lat, d.lng], {icon: icon}).addTo(map)
+                    .bindPopup(`
+                        <div style="font-family: Arial, sans-serif; min-width: 200px;">
+                            <h4 style="margin: 0 0 5px 0; color: #1e3a8a;">${d.name}</h4>
+                            <span class="${d.owner === 'Privé' ? 'badge-prive' : 'badge-public'}" style="display:inline-block; margin-bottom: 8px;">${d.owner}</span>
+                            <p style="margin: 2px 0;"><strong>Catégorie :</strong> ${d.cat}</p>
+                            <p style="margin: 2px 0;"><strong>Adresse :</strong> ${d.address}</p>
+                            <p style="margin: 2px 0;"><strong>Distance :</strong> ${d.dist} km</p>
+                            <p style="margin: 2px 0;"><strong>Surface :</strong> ${d.surface}</p>
+                            <p style="margin: 2px 0;"><strong>Capacité :</strong> ${d.capacity}</p>
+                            <p style="margin: 2px 0;"><strong>Personnel :</strong> ${d.staff}</p>
+                            <p style="margin: 2px 0;"><strong>CA :</strong> ${d.ca}</p>
+                            <p style="margin: 2px 0;"><strong>Tarifs :</strong> ${d.price}</p>
+                            <p style="margin: 2px 0;"><strong>Horaires :</strong> ${d.hours}</p>
+                        </div>
+                    `);
+                mapMarkers.push(marker);
+            });
+
+            const tbody = document.querySelector('#data-table tbody');
+            tbody.innerHTML = '';
+            filteredData.forEach(d => {
+                let badgeClass = d.owner === 'Privé' ? 'badge-prive' : 'badge-public';
+                tbody.innerHTML += `<tr>
+                    <td><strong>${d.name}</strong><br><small>${d.address}</small></td>
+                    <td>${d.cat}</td>
+                    <td>${d.dist} km</td>
+                    <td><span class="${badgeClass}">${d.owner}</span></td>
+                    <td>${d.capacity}</td>
+                    <td>${d.price}</td>
+                    <td>${d.hours}</td>
+                </tr>`;
+            });
+
+            updateCharts(filteredData);
+        }
+
+        function resetFilters() {
+            document.getElementById('f-search').value = '';
+            document.getElementById('f-category').value = 'All';
+            document.getElementById('f-owner').value = 'All';
+            document.getElementById('f-dist').value = '10';
+            document.getElementById('dist-val').innerText = '10';
+            ['f-capacity','f-staff','f-ca','f-price','f-hours'].forEach(id => document.getElementById(id).value = 'All');
+            applyFilters();
+        }
+
+        // 5. Moteur de statistiques
+        function updateCharts(filteredData = data) {
+            const destroyChart = id => {
+                if (chartInstances[id]) chartInstances[id].destroy();
+            };
+
+            const countBy = (arr, fn) => {
+                const out = {};
+                arr.forEach(d => {
+                    const k = fn(d);
+                    out[k] = (out[k] || 0) + 1;
+                });
+                return out;
+            };
+
+            const n = filteredData.length;
+            const avgDist = n ? filteredData.reduce((s,d) => s + d.dist, 0) / n : 0;
+            const privateCount = filteredData.filter(d => d.owner === 'Privé').length;
+            const priceKnown = filteredData.filter(d => isKnown(d.price)).length;
+
+            document.getElementById('kpi-total').textContent = n;
+            document.getElementById('kpi-near').textContent = filteredData.filter(d => d.dist < 3).length;
+            document.getElementById('kpi-avg-dist').textContent = n ? avgDist.toFixed(1) + ' km' : '—';
+            document.getElementById('kpi-private').textContent = n ? Math.round(privateCount / n * 100) + '%' : '0%';
+            document.getElementById('kpi-price').textContent = n ? Math.round(priceKnown / n * 100) + '%' : '0%';
+
+            // Activités
+            const activities = countBy(filteredData, d => d.cat);
+            destroyChart('chartActivities');
+            chartInstances.chartActivities = new Chart(document.getElementById('chartActivities'), {
+                type: 'bar',
+                data: { labels: Object.keys(activities), datasets: [{ label: "Nombre d’équipements", data: Object.values(activities) }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+            });
+
+            // Propriétaires
+            const owners = countBy(filteredData, d => d.owner);
+            destroyChart('chartOwner');
+            chartInstances.chartOwner = new Chart(document.getElementById('chartOwner'), {
+                type: 'doughnut',
+                data: { labels: Object.keys(owners), datasets: [{ data: Object.values(owners) }] },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+
+            // Bandes de distance
+            const bands = {
+                '0–1 km': filteredData.filter(d => d.dist <= 1).length,
+                '1–3 km': filteredData.filter(d => d.dist > 1 && d.dist <= 3).length,
+                '3–5 km': filteredData.filter(d => d.dist > 3 && d.dist <= 5).length,
+                '5–7 km': filteredData.filter(d => d.dist > 5 && d.dist <= 7).length,
+                '7–10 km': filteredData.filter(d => d.dist > 7 && d.dist <= 10).length
+            };
+            destroyChart('chartDistanceBands');
+            chartInstances.chartDistanceBands = new Chart(document.getElementById('chartDistanceBands'), {
+                type: 'bar',
+                data: { labels: Object.keys(bands), datasets: [{ label: 'Équipements', data: Object.values(bands) }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+            });
+
+            // Tarification
+            const pricing = {
+                'Gratuit / associatif': filteredData.filter(d => priceType(d.price) === 'free').length,
+                'Abonnement': filteredData.filter(d => priceType(d.price) === 'subscription').length,
+                'Location / séance': filteredData.filter(d => priceType(d.price) === 'rental').length,
+                'Autre tarif': filteredData.filter(d => priceType(d.price) === 'other').length,
+                'Non renseigné': filteredData.filter(d => priceType(d.price) === 'unknown').length
+            };
+            destroyChart('chartPricing');
+            chartInstances.chartPricing = new Chart(document.getElementById('chartPricing'), {
+                type: 'bar',
+                data: { labels: Object.keys(pricing), datasets: [{ label: 'Structures', data: Object.values(pricing) }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+            });
+
+            // Horaires
+            const hours = {
+                'Jusqu’à 23h+': filteredData.filter(d => hasLateHours(d.hours)).length,
+                'Ouvert 7j/7': filteredData.filter(d => isDaily(d.hours)).length,
+                'Autres / renseignés': filteredData.filter(d => isKnown(d.hours) && !hasLateHours(d.hours) && !isDaily(d.hours)).length,
+                'Non renseigné': filteredData.filter(d => !isKnown(d.hours)).length
+            };
+            destroyChart('chartHours');
+            chartInstances.chartHours = new Chart(document.getElementById('chartHours'), {
+                type: 'bar',
+                data: { labels: Object.keys(hours), datasets: [{ label: 'Structures', data: Object.values(hours) }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+            });
+
+            // Qualité / disponibilité des données
+            const quality = {
+                'Capacité renseignée': filteredData.filter(d => isKnown(d.capacity)).length,
+                'Personnel renseigné': filteredData.filter(d => isKnown(d.staff)).length,
+                'CA renseigné': filteredData.filter(d => isKnown(d.ca)).length,
+                'Tarif renseigné': filteredData.filter(d => isKnown(d.price)).length,
+                'Horaires renseignés': filteredData.filter(d => isKnown(d.hours)).length
+            };
+            destroyChart('chartDataQuality');
+            chartInstances.chartDataQuality = new Chart(document.getElementById('chartDataQuality'), {
+                type: 'bar',
+                data: { labels: Object.keys(quality), datasets: [{ label: 'Structures', data: Object.values(quality) }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } }
+            });
+
+            // Capacité renseignée par catégorie
+            const categories = [...new Set(filteredData.map(d => d.cat))];
+            const capacityKnown = categories.map(c => filteredData.filter(d => d.cat === c && isKnown(d.capacity)).length);
+            const capacityUnknown = categories.map(c => filteredData.filter(d => d.cat === c && !isKnown(d.capacity)).length);
+            destroyChart('chartCapacity');
+            chartInstances.chartCapacity = new Chart(document.getElementById('chartCapacity'), {
+                type: 'bar',
+                data: {
+                    labels: categories,
+                    datasets: [
+                        { label: 'Capacité renseignée', data: capacityKnown },
+                        { label: 'Capacité non renseignée', data: capacityUnknown }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } }
+            });
+        }
+
+        populateDynamicFilters();
+        applyFilters();
+
+        setTimeout(() => {
+            map.invalidateSize(true);
+            updateCharts(getFilteredData());
+        }, 300);
+    </script>
+</body>
+</html>
